@@ -415,6 +415,7 @@ from open_webui.env import (
     WEBUI_AUTH_TRUSTED_EMAIL_HEADER,
     WEBUI_AUTH_TRUSTED_NAME_HEADER,
     WEBUI_AUTH_SIGNOUT_REDIRECT_URL,
+    WEBUI_FAVICON_URL,
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_WEBSOCKET_SUPPORT,
     BYPASS_MODEL_ACCESS_CONTROL,
@@ -658,6 +659,7 @@ app.state.BASE_MODELS = []
 ########################################
 
 app.state.config.WEBUI_URL = WEBUI_URL
+app.state.config.WEBUI_FAVICON_URL = WEBUI_FAVICON_URL
 app.state.config.ENABLE_SIGNUP = ENABLE_SIGNUP
 app.state.config.ENABLE_LOGIN_FORM = ENABLE_LOGIN_FORM
 
@@ -1554,6 +1556,7 @@ async def get_app_config(request: Request):
         "name": app.state.WEBUI_NAME,
         "version": VERSION,
         "default_locale": str(DEFAULT_LOCALE),
+        "favicon_url": app.state.config.WEBUI_FAVICON_URL,
         "oauth": {
             "providers": {
                 name: config.get("name", name)
@@ -1631,6 +1634,7 @@ async def get_app_config(request: Request):
                     "pending_user_overlay_title": app.state.config.PENDING_USER_OVERLAY_TITLE,
                     "pending_user_overlay_content": app.state.config.PENDING_USER_OVERLAY_CONTENT,
                     "response_watermark": app.state.config.RESPONSE_WATERMARK,
+                    "favicon_url": app.state.config.WEBUI_FAVICON_URL,
                 },
                 "license_metadata": app.state.LICENSE_METADATA,
                 **(
@@ -1794,7 +1798,7 @@ async def get_opensearch_xml():
     <ShortName>{app.state.WEBUI_NAME}</ShortName>
     <Description>Search {app.state.WEBUI_NAME}</Description>
     <InputEncoding>UTF-8</InputEncoding>
-    <Image width="16" height="16" type="image/x-icon">{app.state.config.WEBUI_URL}/static/favicon.png</Image>
+    <Image width="16" height="16" type="image/x-icon">{app.state.config.WEBUI_URL}/favicon.png</Image>
     <Url type="text/html" method="get" template="{app.state.config.WEBUI_URL}/?q={"{searchTerms}"}"/>
     <moz:SearchForm>{app.state.config.WEBUI_URL}</moz:SearchForm>
     </OpenSearchDescription>
@@ -1811,6 +1815,36 @@ async def healthcheck():
 async def healthcheck_with_db():
     Session.execute(text("SELECT 1;")).all()
     return {"status": True}
+
+
+@app.get("/favicon.ico")
+@app.get("/favicon.png")
+async def get_favicon():
+    """Serve favicon from WEBUI_FAVICON_URL environment variable"""
+    try:
+        if app.state.config.WEBUI_FAVICON_URL.startswith('http'):
+            # If it's a URL, fetch and return the image
+            async with aiohttp.ClientSession() as session:
+                async with session.get(app.state.config.WEBUI_FAVICON_URL) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                        content_type = response.headers.get('content-type', 'image/png')
+                        return Response(content=content, media_type=content_type)
+        else:
+            # If it's a local file path, serve it directly
+            from pathlib import Path
+            favicon_path = Path(app.state.config.WEBUI_FAVICON_URL)
+            if favicon_path.exists() and favicon_path.is_file():
+                return FileResponse(favicon_path)
+    except Exception as e:
+        log.warning(f"Failed to serve favicon from {app.state.config.WEBUI_FAVICON_URL}: {e}")
+    
+    # Fallback to default favicon
+    default_favicon = STATIC_DIR / "favicon.png"
+    if default_favicon.exists():
+        return FileResponse(default_favicon)
+    else:
+        return Response(status_code=404)
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
